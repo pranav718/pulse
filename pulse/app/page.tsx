@@ -62,7 +62,6 @@ export default function Home() {
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [isProcessingOCR, setIsProcessingOCR] = useState(false);
-  const [ocrController, setOcrController] = useState<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -199,77 +198,32 @@ export default function Home() {
     }
   };
 
-  const performOCR = async (file: File, controller: AbortController): Promise<string> => {
-    try {
-      const Tesseract = await import("tesseract.js");
-      const result = await Tesseract.recognize(file, "eng", {
-        logger: (m) => {
-          if (controller.signal.aborted) {
-            throw new Error("OCR cancelled");
-          }
-          console.log(m);
-        },
-      });
-      return result.data.text;
-    } catch (error) {
-      if (controller.signal.aborted) {
-        console.log("OCR cancelled by user");
-        return "";
-      }
-      console.error("OCR Error:", error);
-      return "";
-    }
-  };
-
-  // --- Cancel OCR ---
-  const cancelOCR = () => {
-    if (ocrController) {
-      ocrController.abort();
-      setOcrController(null);
-    }
-    setIsProcessingOCR(false);
-    setAttachedFiles([]);
-  };
-
   // --- File Upload Handlers ---
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
 
     const newFiles: AttachedFile[] = [];
-    const controller = new AbortController();
-    setOcrController(controller);
-    setIsProcessingOCR(true);
 
     try {
       for (let i = 0; i < files.length; i++) {
-        if (controller.signal.aborted) break;
-
         const file = files[i];
         const isImage = file.type.startsWith("image/");
 
         if (isImage) {
           const preview = URL.createObjectURL(file);
           newFiles.push({ file, preview, type: "image" });
-
-          // Perform OCR on image
-          const text = await performOCR(file, controller);
-          if (text.trim() && !controller.signal.aborted) {
-            setMessage((prev) => prev + (prev ? "\n\n" : "") + `[Extracted from image]:\n${text}`);
-          }
+        } else if (file.type === "application/pdf") {
+          newFiles.push({ file, type: "file" });
         } else {
           newFiles.push({ file, type: "file" });
         }
       }
 
-      if (!controller.signal.aborted) {
-        setAttachedFiles((prev) => [...prev, ...newFiles]);
-      }
+      setAttachedFiles((prev) => [...prev, ...newFiles]);
     } catch (error) {
       console.error("Error processing files:", error);
     } finally {
-      setIsProcessingOCR(false);
-      setOcrController(null);
       setAttachMenuOpen(false);
 
       // Reset file input
@@ -293,7 +247,6 @@ export default function Home() {
 
   // --- New Chat Handler ---
   const handleNewChat = () => {
-    // Close all menus
     setUserMenuOpen(false);
     setAttachMenuOpen(false);
     
@@ -306,7 +259,6 @@ export default function Home() {
 
   // --- Load Chat Handler ---
   const handleLoadChat = (chatId: string) => {
-    // Close all menus
     setUserMenuOpen(false);
     setAttachMenuOpen(false);
     
@@ -335,7 +287,6 @@ export default function Home() {
     const messageText = message.trim();
     if (!messageText || isLoading) return;
 
-    // Close all menus
     setUserMenuOpen(false);
     setAttachMenuOpen(false);
 
@@ -359,7 +310,52 @@ export default function Home() {
       setIsChatActive(true);
     }
 
-    // Convert attached files to base64
+    // Show processing indicator if there are files
+    if (attachedFiles.length > 0) {
+      setIsProcessingOCR(true);
+    }
+
+    // EXTRACT TEXT FROM FILES BEFORE SENDING
+    const fileTexts: string[] = [];
+    
+    try {
+      for (const attachedFile of attachedFiles) {
+        if (attachedFile.type === "image") {
+          console.log("🔍 Extracting text from image:", attachedFile.file.name);
+          const Tesseract = await import("tesseract.js");
+          const result = await Tesseract.recognize(attachedFile.file, "eng", {
+            logger: (m) => console.log("OCR Progress:", m),
+          });
+          const extractedText = result.data.text;
+          console.log("✅ Extracted text length:", extractedText.length);
+          
+          if (extractedText.trim()) {
+            fileTexts.push(`📋 **Extracted from ${attachedFile.file.name}:**\n${extractedText}`);
+          } else {
+            fileTexts.push(`📋 **${attachedFile.file.name}:** [No text could be extracted from this image]`);
+          }
+        } else if (attachedFile.type === "file") {
+            console.log("📄 Extracting text from PDF:", attachedFile.file.name);
+            const { extractTextFromPDF } = await import("@/lib/pdf-utils");
+            const base64 = await fileToBase64(attachedFile.file);
+            const extractedText = await extractTextFromPDF(base64);
+            console.log("✅ Extracted PDF text length:", extractedText.length);
+            
+            if (extractedText.trim()) {
+              fileTexts.push(`📄 **Extracted from ${attachedFile.file.name}:**\n${extractedText}`);
+            } else {
+              fileTexts.push(`📄 **${attachedFile.file.name}:** [No text could be extracted from this PDF]`);
+            }
+          }
+      }
+    } catch (error) {
+      console.error("❌ Error extracting text:", error);
+      fileTexts.push("[Error extracting text from files. Sending without extracted content.]");
+    } finally {
+      setIsProcessingOCR(false);
+    }
+
+    // Convert attached files to base64 for display
     const attachments: Attachment[] = await Promise.all(
       attachedFiles.map(async (file) => ({
         name: file.file.name,
@@ -368,8 +364,20 @@ export default function Home() {
       }))
     );
 
+    // COMBINE USER MESSAGE WITH EXTRACTED TEXT
+    const fullMessage = fileTexts.length > 0
+      ? `${messageText}\n\n${fileTexts.join("\n\n")}`
+      : messageText;
+
     const currentMessage = messageText;
     const currentAttachments = attachments;
+
+    console.log("📤 Sending message:", {
+      userMessage: currentMessage,
+      hasFiles: attachedFiles.length,
+      extractedTexts: fileTexts.length,
+      fullMessageLength: fullMessage.length,
+    });
 
     setMessage("");
     resetTranscript();
@@ -397,12 +405,16 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          message: currentMessage,
-          attachments: currentAttachments,
+          message: fullMessage,
+          hasAttachments: currentAttachments.length > 0,
         }),
       });
 
-      if (!response.ok) throw new Error("API request failed");
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "API request failed");
+      }
+      
       const { response: aiText } = await response.json();
 
       await sendMessage({
@@ -412,7 +424,7 @@ export default function Home() {
         chatId,
       });
     } catch (error) {
-      console.error("Error sending message:", error);
+      console.error("❌ Error sending message:", error);
       await sendMessage({
         user: userId,
         role: "assistant",
@@ -446,7 +458,7 @@ export default function Home() {
         <div className="absolute bottom-32 right-20 w-80 h-80 bg-blue-200 rounded-full blur-pulse-slow opacity-35" />
       </div>
 
-      {/* OCR Processing Notification - FIXED AT TOP CENTER */}
+      {/* OCR Processing Notification */}
       <AnimatePresence>
         {isProcessingOCR && (
           <motion.div
@@ -459,20 +471,12 @@ export default function Home() {
             <Loader2 className="w-5 h-5 text-blue-600 animate-spin flex-shrink-0" />
             <div className="flex-1">
               <p className="font-serif text-sm font-medium text-foreground">
-                Extracting text from image...
+                Processing files...
               </p>
               <p className="font-serif text-xs text-foreground/60 mt-0.5">
-                This may take a few seconds
+                Extracting text from your documents
               </p>
             </div>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={cancelOCR}
-              className="px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs font-serif transition-colors"
-            >
-              Cancel
-            </motion.button>
           </motion.div>
         )}
       </AnimatePresence>
@@ -541,7 +545,7 @@ export default function Home() {
 
       {/* Main Content */}
       <div className="relative z-10 flex-1 flex flex-col">
-        {/* Top Controls - FIXED */}
+        {/* Top Controls */}
         <div
           className="fixed top-6 z-30 transition-all duration-300"
           style={{ left: sidebarOpen ? "calc(256px + 1.5rem)" : "1.5rem" }}
@@ -656,9 +660,9 @@ export default function Home() {
                         {/* Attachments */}
                         {msg.attachments && msg.attachments.length > 0 && (
                           <div className="p-3 pb-0 flex flex-wrap gap-2">
-                            {msg.attachments.map((attachment: Attachment, idx: number) => (
+                            {msg.attachments.map((attachment: { type: string; name: string; url: string; }, idx: number) => (
                               <div key={idx} className="relative">
-                                {attachment.type === "image" ? (
+                                {(attachment.type as "image" | "file") === "image" ? (
                                   <img
                                     src={attachment.url}
                                     alt={attachment.name}
@@ -736,7 +740,7 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Input Area (Chat View) - FIXED */}
+              {/* Input Area (Chat View) */}
               <div
                 className="fixed bottom-0 left-0 right-0 z-30 px-6 py-6 border-t border-blue-100/50 bg-white/30 backdrop-blur-md flex justify-center transition-all duration-300"
                 style={{ left: sidebarOpen ? "256px" : "0" }}
