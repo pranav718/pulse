@@ -7,7 +7,7 @@ export default defineSchema({
     role: v.union(v.literal("user"), v.literal("assistant")),
     text: v.string(),
     createdAt: v.number(),
-  }).index("by_creation_time", ["createdAt"]),
+  }).index("by_user", ["user"]),
 
   appointments: defineTable({
     user: v.string(),

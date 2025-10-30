@@ -8,6 +8,10 @@
  * @module
  */
 
+import type * as appointments from "../appointments.js";
+import type * as messages from "../messages.js";
+import type * as reports from "../reports.js";
+
 import type {
   ApiFromModules,
   FilterApi,
@@ -22,7 +26,11 @@ import type {
  * const myFunctionReference = api.myModule.myFunction;
  * ```
  */
-declare const fullApi: ApiFromModules<{}>;
+declare const fullApi: ApiFromModules<{
+  appointments: typeof appointments;
+  messages: typeof messages;
+  reports: typeof reports;
+}>;
 declare const fullApiWithMounts: typeof fullApi;
 
 export declare const api: FilterApi<

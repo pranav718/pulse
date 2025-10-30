@@ -1,0 +1,21 @@
+{
+  "name": "pulse",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react-speech-recognition": "^3.9.6"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "convex": "^1.28.0",
+    "framer-motion": "^12.23.24",
+    "lucide-react": "^0.548.0",
+    "openai": "^6.7.0",
+    "pdf-parse": "^2.4.5",
+    "react-speech-recognition": "^4.0.1"
+  }
+}
