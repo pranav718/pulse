@@ -47,6 +47,12 @@ interface ChatSession {
   userId: string;
 }
 
+interface Attachment {
+  name: string;
+  type: "image" | "file";
+  url: string;
+}
+
 export default function Home() {
   // --- States ---
   const [message, setMessage] = useState("");
@@ -314,6 +320,16 @@ export default function Home() {
     return words.length > 30 ? words.slice(0, 30) + "..." : words;
   };
 
+  // --- Convert File to Base64 ---
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
   // --- Send Message Handler ---
   const handleSendMessage = async () => {
     const messageText = message.trim();
@@ -343,6 +359,18 @@ export default function Home() {
       setIsChatActive(true);
     }
 
+    // Convert attached files to base64
+    const attachments: Attachment[] = await Promise.all(
+      attachedFiles.map(async (file) => ({
+        name: file.file.name,
+        type: file.type,
+        url: await fileToBase64(file.file),
+      }))
+    );
+
+    const currentMessage = messageText;
+    const currentAttachments = attachments;
+
     setMessage("");
     resetTranscript();
     setIsLoading(true);
@@ -352,8 +380,9 @@ export default function Home() {
       await sendMessage({
         user: userId,
         role: "user",
-        text: messageText,
+        text: currentMessage,
         chatId,
+        attachments: currentAttachments.length > 0 ? currentAttachments : undefined,
       });
 
       setTypingIndicator({
@@ -367,7 +396,10 @@ export default function Home() {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: messageText }),
+        body: JSON.stringify({ 
+          message: currentMessage,
+          attachments: currentAttachments,
+        }),
       });
 
       if (!response.ok) throw new Error("API request failed");
@@ -615,13 +647,46 @@ export default function Home() {
                       {/* Message Bubble */}
                       <motion.div
                         whileHover={{ scale: 1.02 }}
-                        className={`max-w-xs px-4 py-3 rounded-2xl font-serif text-sm ${
+                        className={`max-w-xs rounded-2xl font-serif text-sm ${
                           msg.role === "user"
                             ? "bg-blue-500 text-white rounded-br-none"
                             : "bg-white/80 backdrop-blur-md text-foreground border border-blue-100/50 rounded-bl-none"
-                        } prose prose-sm prose-p:my-0`}
+                        }`}
                       >
-                        <ReactMarkdown>{msg.text}</ReactMarkdown>
+                        {/* Attachments */}
+                        {msg.attachments && msg.attachments.length > 0 && (
+                          <div className="p-3 pb-0 flex flex-wrap gap-2">
+                            {msg.attachments.map((attachment: Attachment, idx: number) => (
+                              <div key={idx} className="relative">
+                                {attachment.type === "image" ? (
+                                  <img
+                                    src={attachment.url}
+                                    alt={attachment.name}
+                                    className="w-full max-w-[200px] rounded-lg"
+                                  />
+                                ) : (
+                                  <div className={`flex items-center gap-2 rounded-lg px-3 py-2 ${
+                                    msg.role === "user" 
+                                      ? "bg-white/20" 
+                                      : "bg-blue-50"
+                                  }`}>
+                                    <File className="w-4 h-4" />
+                                    <span className="text-xs truncate max-w-[150px]">
+                                      {attachment.name}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Message Text */}
+                        {msg.text && (
+                          <div className="px-4 py-3 prose prose-sm prose-p:my-0">
+                            <ReactMarkdown>{msg.text}</ReactMarkdown>
+                          </div>
+                        )}
                       </motion.div>
                     </motion.div>
                   ))}

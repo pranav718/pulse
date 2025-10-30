@@ -4,7 +4,6 @@ import { Instrument_Serif } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import { ConvexClientProvider } from "./ConvexClientProvider";
-import Navbar from "@/components/Navbar";
 
 const instrumentSerif = Instrument_Serif({
   subsets: ["latin"],
@@ -25,7 +24,6 @@ export default function RootLayout({
     <html lang="en">
       <body className={instrumentSerif.className}>
         <ConvexClientProvider>
-          <Navbar />
           {children}
         </ConvexClientProvider>
         <Analytics />
