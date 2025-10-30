@@ -1,10 +1,11 @@
-// convex/appointments.ts - REPLACE
-import { mutation, query } from "./_generated/server";
+// convex/appointments.ts - REPLACE ENTIRE FILE
 import { v } from "convex/values";
+import { mutation, query } from "./_generated/server";
 import { auth } from "./auth.config";
 
 export const create = mutation({
   args: {
+    userId: v.string(),
     doctor: v.string(),
     date: v.string(),
     time: v.string(),
@@ -12,42 +13,37 @@ export const create = mutation({
     googleEventId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const userId = await auth.getUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
-
     return await ctx.db.insert("appointments", {
-      userId,
-      ...args,
+      userId: args.userId,
+      doctor: args.doctor,
+      date: args.date,
+      time: args.time,
+      reason: args.reason,
       status: "pending",
+      googleEventId: args.googleEventId,
       createdAt: Date.now(),
     });
   },
 });
 
 export const list = query({
-  args: {},
-  handler: async (ctx) => {
-    const userId = await auth.getUserId(ctx);
-    if (!userId) return [];
-
+  args: { userId: v.string() },
+  handler: async (ctx, args) => {
     return await ctx.db
       .query("appointments")
-      .withIndex("by_userId", (q) => q.eq("userId", userId))
+      .withIndex("by_userId", (q) => q.eq("userId", args.userId))
       .order("desc")
       .collect();
   },
 });
 
 export const getUpcoming = query({
-  args: {},
-  handler: async (ctx) => {
-    const userId = await auth.getUserId(ctx);
-    if (!userId) return [];
-
+  args: { userId: v.string() },
+  handler: async (ctx, args) => {
     const now = Date.now();
     const allAppointments = await ctx.db
       .query("appointments")
-      .withIndex("by_userId", (q) => q.eq("userId", userId))
+      .withIndex("by_userId", (q) => q.eq("userId", args.userId))
       .collect();
 
     return allAppointments
@@ -73,14 +69,6 @@ export const updateStatus = mutation({
     ),
   },
   handler: async (ctx, args) => {
-    const userId = await auth.getUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
-
-    const appointment = await ctx.db.get(args.id);
-    if (appointment?.userId !== userId) {
-      throw new Error("Unauthorized");
-    }
-
     await ctx.db.patch(args.id, { status: args.status });
   },
 });

@@ -4,12 +4,12 @@ import { authTables } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 
 export default defineSchema({
-  // Auth tables (auto-managed by Convex Auth)
+  // Auth tables (managed by Convex Auth)
   ...authTables,
 
   // Messages
   messages: defineTable({
-    userId: v.id("users"), // Changed from string to user ID
+    userId: v.string(),
     role: v.union(v.literal("user"), v.literal("assistant")),
     text: v.string(),
     createdAt: v.number(),
@@ -17,26 +17,18 @@ export default defineSchema({
 
   // User Usage Limits
   userUsage: defineTable({
-    userId: v.id("users"), // Changed to user ID
-    
-    // Reports
+    userId: v.string(),
     reportsUploaded: v.number(),
     reportsLimit: v.number(),
     totalStorageMB: v.number(),
     storageLimit: v.number(),
-    
-    // Chat
     chatMessagesThisMonth: v.number(),
     chatMessageLimit: v.number(),
-    
-    // Tier
     tier: v.union(
       v.literal("free"),
       v.literal("premium"),
       v.literal("trial")
     ),
-    
-    // Metadata
     lastResetDate: v.string(),
     accountCreatedAt: v.number(),
     trialEndsAt: v.optional(v.number()),
@@ -44,7 +36,7 @@ export default defineSchema({
 
   // Reports
   reports: defineTable({
-    userId: v.id("users"), // Changed to user ID
+    userId: v.string(),
     reportText: v.string(),
     summary: v.string(),
     keyFindings: v.array(
@@ -61,7 +53,7 @@ export default defineSchema({
 
   // Appointments
   appointments: defineTable({
-    userId: v.id("users"), // Changed to user ID
+    userId: v.string(),
     doctor: v.string(),
     date: v.string(),
     time: v.string(),
@@ -79,7 +71,7 @@ export default defineSchema({
 
   // Google Calendar Tokens
   userTokens: defineTable({
-    userId: v.id("users"), // Changed to user ID
+    userId: v.string(),
     accessToken: v.string(),
     refreshToken: v.string(),
     expiryDate: v.number(),
