@@ -1,9 +1,9 @@
+// Your new, correct app/layout.tsx
 import type { Metadata } from "next";
-import { Instrument_Serif } from "next/font/google"; 
-import { Analytics } from "@vercel/analytics/next"; 
-import "./globals.css";
-import { ConvexClientProvider } from "./ConvexClientProvider"; 
-import Navbar from "@/components/Navbar"; 
+import { Instrument_Serif } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
+import "./globals.css"; // This file has the background styles
+import { ConvexClientProvider } from "./ConvexClientProvider";
 
 const instrumentSerif = Instrument_Serif({
   subsets: ["latin"],
@@ -11,7 +11,7 @@ const instrumentSerif = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
-  title: "Serenity - Your Digital Health Assistant", 
+  title: "Serenity - Your Digital Health Assistant", // v0 Title
   description: "Voice and chat-based wellness companion",
 };
 
@@ -23,11 +23,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={instrumentSerif.className}>
+        {/* We provide Convex, but no Navbar or other layout */}
         <ConvexClientProvider>
-          <Navbar />
-          {children}
+          {children} 
         </ConvexClientProvider>
-        <Analytics /> 
+        <Analytics />
       </body>
     </html>
   );
