@@ -11,7 +11,7 @@ const instrumentSerif = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
-  title: "Serenity - Your Digital Health Assistant", // v0 Title
+  title: "Pulse - Your Digital Health Assistant", // v0 Title
   description: "Voice and chat-based wellness companion",
 };
 
