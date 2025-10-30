@@ -283,6 +283,7 @@ export default function Home() {
   };
 
   // --- Send Message Handler ---
+  // --- Send Message Handler ---
   const handleSendMessage = async () => {
     const messageText = message.trim();
     if (!messageText || isLoading) return;
@@ -335,18 +336,18 @@ export default function Home() {
             fileTexts.push(`📋 **${attachedFile.file.name}:** [No text could be extracted from this image]`);
           }
         } else if (attachedFile.type === "file") {
-            console.log("📄 Extracting text from PDF:", attachedFile.file.name);
-            const { extractTextFromPDF } = await import("@/lib/pdf-utils");
-            const base64 = await fileToBase64(attachedFile.file);
-            const extractedText = await extractTextFromPDF(base64);
-            console.log("✅ Extracted PDF text length:", extractedText.length);
-            
-            if (extractedText.trim()) {
-              fileTexts.push(`📄 **Extracted from ${attachedFile.file.name}:**\n${extractedText}`);
-            } else {
-              fileTexts.push(`📄 **${attachedFile.file.name}:** [No text could be extracted from this PDF]`);
-            }
+          console.log("📄 Extracting text from PDF:", attachedFile.file.name);
+          const { extractTextFromPDF } = await import("@/lib/pdf-utils");
+          const base64 = await fileToBase64(attachedFile.file);
+          const extractedText = await extractTextFromPDF(base64);
+          console.log("✅ Extracted PDF text length:", extractedText.length);
+          
+          if (extractedText.trim()) {
+            fileTexts.push(`📄 **Extracted from ${attachedFile.file.name}:**\n${extractedText}`);
+          } else {
+            fileTexts.push(`📄 **${attachedFile.file.name}:** [No text could be extracted from this PDF]`);
           }
+        }
       }
     } catch (error) {
       console.error("❌ Error extracting text:", error);
@@ -401,12 +402,24 @@ export default function Home() {
       });
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
 
+      // 🆕 BUILD CONVERSATION HISTORY
+      // Get last 10 messages for context (to avoid token limits)
+      const conversationHistory = convexMessages
+        .slice(-10) // Last 10 messages
+        .map((msg: any) => ({
+          role: msg.role,
+          content: msg.text,
+        }));
+
+      console.log("💬 Sending conversation history:", conversationHistory.length, "messages");
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           message: fullMessage,
           hasAttachments: currentAttachments.length > 0,
+          conversationHistory, // 🆕 Include conversation history
         }),
       });
 
