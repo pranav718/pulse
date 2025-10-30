@@ -1,23 +1,18 @@
+// Your new tailwind.config.ts (Corrected)
 import type { Config } from "tailwindcss";
+
+// 1. Import the plugins at the top
+import tailwindcssAnimate from "tailwindcss-animate";
 
 const config: Config = {
   content: [
-    "./pages/*/.{js,ts,jsx,tsx,mdx}",
-    "./components/*/.{js,ts,jsx,tsx,mdx}",
-    "./app/*/.{js,ts,jsx,tsx,mdx}",
+    "./pages/**/*.{js,ts,jsx,tsx,mdx}",
+    "./components/**/*.{js,ts,jsx,tsx,mdx}",
+    "./app/**/*.{js,ts,jsx,tsx,mdx}",
   ],
-  theme: {
-    extend: {
-      colors: {
-        primary: "#6366f1",
-        secondary: "#8b5cf6",
-        accent: "#ec4899",
-      },
-      animation: {
-        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-      },
-    },
-  },
-  plugins: [],
+  plugins: [
+    // 2. Use the imported variables here
+    tailwindcssAnimate,
+  ],
 };
 export default config;
