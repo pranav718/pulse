@@ -12,6 +12,12 @@ import {
   Settings,
   UserCircle,
   Volume2,
+  Plus,
+  Image as ImageIcon,
+  File,
+  Paperclip,
+  Loader2,
+  MessageSquare,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
@@ -28,10 +34,17 @@ interface TypingMessage {
   isTyping: boolean;
 }
 
-interface ChatItem {
-  id: number;
+interface AttachedFile {
+  file: File;
+  preview?: string;
+  type: "image" | "file";
+}
+
+interface ChatSession {
+  id: string;
   title: string;
   timestamp: Date;
+  userId: string;
 }
 
 export default function Home() {
@@ -40,7 +53,16 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isChatActive, setIsChatActive] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [isProcessingOCR, setIsProcessingOCR] = useState(false);
+  const [ocrController, setOcrController] = useState<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // --- Chat Session States ---
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
 
   // --- Mic Visualizer States ---
   const [isRecording, setIsRecording] = useState(false);
@@ -56,7 +78,10 @@ export default function Home() {
   const [typingIndicator, setTypingIndicator] = useState<TypingMessage | null>(null);
 
   // --- Convex Hooks ---
-  const convexMessages = useQuery(api.messages.list, { user: userId }) || [];
+  const convexMessages = useQuery(
+    api.messages.list,
+    currentChatId ? { user: userId, chatId: currentChatId } : "skip"
+  ) || [];
   const sendMessage = useMutation(api.messages.send);
 
   // --- Speech Hook ---
@@ -72,6 +97,41 @@ export default function Home() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [convexMessages, typingIndicator]);
+
+  // Load chat sessions from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem(`chatSessions-${userId}`);
+    if (saved) {
+      const sessions = JSON.parse(saved).map((s: any) => ({
+        ...s,
+        timestamp: new Date(s.timestamp),
+      }));
+      setChatSessions(sessions);
+    }
+  }, [userId]);
+
+  // Save chat sessions to localStorage
+  useEffect(() => {
+    if (chatSessions.length > 0) {
+      localStorage.setItem(`chatSessions-${userId}`, JSON.stringify(chatSessions));
+    }
+  }, [chatSessions, userId]);
+
+  // Close menus when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest(".user-menu-container")) {
+        setUserMenuOpen(false);
+      }
+      if (!target.closest(".attach-menu-container")) {
+        setAttachMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // --- Visualizer Logic ---
   const updateVisualizer = () => {
@@ -133,10 +193,152 @@ export default function Home() {
     }
   };
 
+  // --- OCR Function ---
+  const performOCR = async (file: File, controller: AbortController): Promise<string> => {
+    try {
+      const Tesseract = await import("tesseract.js");
+      const result = await Tesseract.recognize(file, "eng", {
+        logger: (m) => {
+          if (controller.signal.aborted) {
+            throw new Error("OCR cancelled");
+          }
+          console.log(m);
+        },
+      });
+      return result.data.text;
+    } catch (error) {
+      if (controller.signal.aborted) {
+        console.log("OCR cancelled by user");
+        return "";
+      }
+      console.error("OCR Error:", error);
+      return "";
+    }
+  };
+
+  // --- Cancel OCR ---
+  const cancelOCR = () => {
+    if (ocrController) {
+      ocrController.abort();
+      setOcrController(null);
+    }
+    setIsProcessingOCR(false);
+    setAttachedFiles([]);
+  };
+
+  // --- File Upload Handlers ---
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    const newFiles: AttachedFile[] = [];
+    const controller = new AbortController();
+    setOcrController(controller);
+    setIsProcessingOCR(true);
+
+    try {
+      for (let i = 0; i < files.length; i++) {
+        if (controller.signal.aborted) break;
+
+        const file = files[i];
+        const isImage = file.type.startsWith("image/");
+
+        if (isImage) {
+          const preview = URL.createObjectURL(file);
+          newFiles.push({ file, preview, type: "image" });
+
+          // Perform OCR on image
+          const text = await performOCR(file, controller);
+          if (text.trim() && !controller.signal.aborted) {
+            setMessage((prev) => prev + (prev ? "\n\n" : "") + `[Extracted from image]:\n${text}`);
+          }
+        } else {
+          newFiles.push({ file, type: "file" });
+        }
+      }
+
+      if (!controller.signal.aborted) {
+        setAttachedFiles((prev) => [...prev, ...newFiles]);
+      }
+    } catch (error) {
+      console.error("Error processing files:", error);
+    } finally {
+      setIsProcessingOCR(false);
+      setOcrController(null);
+      setAttachMenuOpen(false);
+
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  // --- Remove File Handler ---
+  const removeFile = (index: number) => {
+    setAttachedFiles((prev) => {
+      const newFiles = [...prev];
+      if (newFiles[index].preview) {
+        URL.revokeObjectURL(newFiles[index].preview!);
+      }
+      newFiles.splice(index, 1);
+      return newFiles;
+    });
+  };
+
+  // --- New Chat Handler ---
+  const handleNewChat = () => {
+    // Close all menus
+    setUserMenuOpen(false);
+    setAttachMenuOpen(false);
+    
+    setIsChatActive(false);
+    setCurrentChatId(null);
+    setMessage("");
+    setAttachedFiles([]);
+    resetTranscript();
+  };
+
+  // --- Load Chat Handler ---
+  const handleLoadChat = (chatId: string) => {
+    // Close all menus
+    setUserMenuOpen(false);
+    setAttachMenuOpen(false);
+    
+    setCurrentChatId(chatId);
+    setIsChatActive(true);
+  };
+
+  // --- Generate Chat Title ---
+  const generateChatTitle = (firstMessage: string): string => {
+    const words = firstMessage.trim().split(" ").slice(0, 5).join(" ");
+    return words.length > 30 ? words.slice(0, 30) + "..." : words;
+  };
+
   // --- Send Message Handler ---
   const handleSendMessage = async () => {
     const messageText = message.trim();
     if (!messageText || isLoading) return;
+
+    // Close all menus
+    setUserMenuOpen(false);
+    setAttachMenuOpen(false);
+
+    // Create new chat session if needed
+    let chatId = currentChatId;
+    if (!chatId) {
+      chatId = "chat-" + Date.now() + "-" + Math.random().toString(36).substr(2, 9);
+      setCurrentChatId(chatId);
+
+      const newSession: ChatSession = {
+        id: chatId,
+        title: generateChatTitle(messageText),
+        timestamp: new Date(),
+        userId,
+      };
+
+      setChatSessions((prev) => [newSession, ...prev]);
+    }
 
     if (!isChatActive) {
       setIsChatActive(true);
@@ -145,12 +347,14 @@ export default function Home() {
     setMessage("");
     resetTranscript();
     setIsLoading(true);
+    setAttachedFiles([]);
 
     try {
       await sendMessage({
         user: userId,
         role: "user",
         text: messageText,
+        chatId,
       });
 
       setTypingIndicator({
@@ -174,6 +378,7 @@ export default function Home() {
         user: userId,
         role: "assistant",
         text: aiText,
+        chatId,
       });
     } catch (error) {
       console.error("Error sending message:", error);
@@ -181,6 +386,7 @@ export default function Home() {
         user: userId,
         role: "assistant",
         text: "Sorry, I'm having trouble connecting. Please try again.",
+        chatId: chatId!,
       });
     } finally {
       setIsLoading(false);
@@ -209,6 +415,37 @@ export default function Home() {
         <div className="absolute bottom-32 right-20 w-80 h-80 bg-blue-200 rounded-full blur-pulse-slow opacity-35" />
       </div>
 
+      {/* OCR Processing Notification - FIXED AT TOP CENTER */}
+      <AnimatePresence>
+        {isProcessingOCR && (
+          <motion.div
+            initial={{ opacity: 0, y: -100 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -100 }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
+            className="fixed top-6 left-1/2 -translate-x-1/2 z-50 bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-blue-100 px-6 py-4 flex items-center gap-4 min-w-[320px]"
+          >
+            <Loader2 className="w-5 h-5 text-blue-600 animate-spin flex-shrink-0" />
+            <div className="flex-1">
+              <p className="font-serif text-sm font-medium text-foreground">
+                Extracting text from image...
+              </p>
+              <p className="font-serif text-xs text-foreground/60 mt-0.5">
+                This may take a few seconds
+              </p>
+            </div>
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={cancelOCR}
+              className="px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs font-serif transition-colors"
+            >
+              Cancel
+            </motion.button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Sidebar */}
       <motion.div
         initial={{ width: 0 }}
@@ -216,32 +453,89 @@ export default function Home() {
         transition={{ duration: 0.3, ease: "easeInOut" }}
         className="relative z-20 bg-white/70 backdrop-blur-md border-r border-blue-100/50 flex flex-col overflow-hidden"
       >
-        <div className="p-4 space-y-6 flex-1 overflow-y-auto">
-          <h2 className="text-sm font-serif font-light text-foreground tracking-wide">
-            Previous Chats
-          </h2>
+        <div className="p-4 space-y-4 flex-1 overflow-y-auto">
+          {/* New Chat Button */}
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={handleNewChat}
+            className="w-full px-4 py-3 rounded-xl bg-gradient-to-br from-blue-400 to-indigo-500 text-white font-serif text-sm flex items-center justify-center gap-2 hover:shadow-lg transition-all"
+          >
+            <Plus className="w-4 h-4" />
+            New Chat
+          </motion.button>
+
+          {/* Chat History */}
+          <div>
+            <h2 className="text-xs font-serif font-light text-foreground/60 tracking-wide mb-3 px-2">
+              RECENT CHATS
+            </h2>
+            <div className="space-y-1">
+              {chatSessions.length === 0 ? (
+                <p className="text-xs font-serif text-foreground/40 px-2 py-4 text-center">
+                  No chats yet
+                </p>
+              ) : (
+                chatSessions.map((chat) => (
+                  <motion.button
+                    key={chat.id}
+                    whileHover={{ scale: 1.02, x: 4 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => handleLoadChat(chat.id)}
+                    className={`w-full px-3 py-2.5 rounded-lg text-left font-serif text-sm transition-all ${
+                      currentChatId === chat.id
+                        ? "bg-blue-100/80 text-blue-900"
+                        : "text-foreground/70 hover:bg-white/50"
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      <MessageSquare className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="truncate">{chat.title}</p>
+                        <p className="text-xs text-foreground/40 mt-0.5">
+                          {new Date(chat.timestamp).toLocaleDateString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                  </motion.button>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       </motion.div>
 
       {/* Main Content */}
       <div className="relative z-10 flex-1 flex flex-col">
-        {/* Top Controls */}
-        <div className="absolute top-6 left-6 z-30">
+        {/* Top Controls - FIXED */}
+        <div
+          className="fixed top-6 z-30 transition-all duration-300"
+          style={{ left: sidebarOpen ? "calc(256px + 1.5rem)" : "1.5rem" }}
+        >
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            onClick={() => setSidebarOpen(!sidebarOpen)}
+            onClick={() => {
+              setSidebarOpen(!sidebarOpen);
+              setUserMenuOpen(false);
+            }}
             className="w-12 h-12 rounded-2xl bg-white/80 backdrop-blur-md border border-blue-100/50 flex items-center justify-center hover:bg-white/90 transition-all hover:shadow-lg"
           >
             {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </motion.button>
         </div>
 
-        <div className="absolute top-6 right-6 z-30">
+        <div className="fixed top-6 right-6 z-30 user-menu-container">
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            onClick={() => setUserMenuOpen(!userMenuOpen)}
+            onClick={() => {
+              setUserMenuOpen(!userMenuOpen);
+              setAttachMenuOpen(false);
+            }}
             className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center hover:shadow-lg transition-all"
           >
             <User className="w-5 h-5 text-white" />
@@ -294,7 +588,7 @@ export default function Home() {
               transition={{ duration: 0.3 }}
               className="flex-1 flex flex-col overflow-hidden"
             >
-              <div className="flex-1 overflow-y-auto px-6 py-24 flex justify-center">
+              <div className="flex-1 overflow-y-auto px-6 py-24 pb-64 flex justify-center">
                 <div className="w-full max-w-2xl space-y-4">
                   {/* Messages */}
                   {convexMessages.map((msg: Doc<"messages">) => (
@@ -319,7 +613,7 @@ export default function Home() {
                         </motion.button>
                       )}
 
-                      {/* Message Bubble - FIXED */}
+                      {/* Message Bubble */}
                       <motion.div
                         whileHover={{ scale: 1.02 }}
                         className={`max-w-xs px-4 py-3 rounded-2xl font-serif text-sm ${
@@ -378,60 +672,167 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Input Area (Chat View) */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: 0.2 }}
-                className="px-6 py-6 border-t border-blue-100/50 bg-white/30 backdrop-blur-md flex justify-center"
+              {/* Input Area (Chat View) - FIXED */}
+              <div
+                className="fixed bottom-0 left-0 right-0 z-30 px-6 py-6 border-t border-blue-100/50 bg-white/30 backdrop-blur-md flex justify-center transition-all duration-300"
+                style={{ left: sidebarOpen ? "256px" : "0" }}
               >
-                <div className="w-full max-w-2xl bg-white/80 backdrop-blur-md rounded-3xl shadow-2xl border border-blue-100/50 p-6 flex gap-3 items-center">
-                  <input
-                    type="text"
-                    placeholder="Ask me anything..."
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    onKeyPress={handleKeyPress}
-                    className="flex-1 bg-transparent text-foreground placeholder-muted-foreground focus:outline-none font-serif text-base"
-                    autoFocus
-                    disabled={isLoading}
-                  />
-                  {/* Mic Button */}
-                  <motion.button
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={handleMicClick}
-                    className={`relative w-10 h-10 ${
-                      isRecording ? "bg-red-500" : "bg-blue-500"
-                    } hover:bg-blue-600 text-white rounded-full p-2 transition-colors flex items-center justify-center`}
-                  >
-                    {isRecording ? (
-                      <div className="flex gap-1 items-center justify-center h-full">
-                        {visualizerBars.map((bar, i) => (
+                <div className="w-full max-w-2xl">
+                  {/* Attached Files Preview */}
+                  {attachedFiles.length > 0 && (
+                    <div className="mb-3 flex flex-wrap gap-2">
+                      {attachedFiles.map((file, index) => (
+                        <motion.div
+                          key={index}
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.8 }}
+                          className="relative group"
+                        >
+                          {file.type === "image" ? (
+                            <div className="relative">
+                              <img
+                                src={file.preview}
+                                alt="Preview"
+                                className="w-20 h-20 object-cover rounded-lg border-2 border-blue-100"
+                              />
+                              <button
+                                onClick={() => removeFile(index)}
+                                className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="relative">
+                              <div className="w-20 h-20 bg-white/80 rounded-lg border-2 border-blue-100 flex flex-col items-center justify-center p-2">
+                                <File className="w-6 h-6 text-blue-500" />
+                                <span className="text-xs text-foreground/70 mt-1 truncate w-full text-center">
+                                  {file.file.name.slice(0, 8)}...
+                                </span>
+                              </div>
+                              <button
+                                onClick={() => removeFile(index)}
+                                className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Input Box */}
+                  <div className="bg-white/80 backdrop-blur-md rounded-3xl shadow-2xl border border-blue-100/50 p-6 flex gap-3 items-center">
+                    {/* Attachment Button */}
+                    <div className="relative attach-menu-container">
+                      <motion.button
+                        whileHover={{ scale: 1.1 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => setAttachMenuOpen(!attachMenuOpen)}
+                        className="w-10 h-10 bg-gray-100 hover:bg-gray-200 text-foreground rounded-full p-2 transition-colors flex items-center justify-center"
+                      >
+                        <Plus className="w-5 h-5" />
+                      </motion.button>
+
+                      {/* Attachment Menu */}
+                      <AnimatePresence>
+                        {attachMenuOpen && (
                           <motion.div
-                            key={i}
-                            animate={{ height: `${Math.max(4, bar * 20)}px` }}
-                            transition={{ duration: 0.1 }}
-                            className="w-1 bg-white rounded-full"
-                            style={{ minHeight: "4px" }}
-                          />
-                        ))}
-                      </div>
-                    ) : (
-                      <Mic className="w-5 h-5" />
-                    )}
-                  </motion.button>
-                  <motion.button
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={handleSendMessage}
-                    disabled={isLoading || !message.trim()}
-                    className="bg-blue-500 hover:bg-blue-600 text-white rounded-full p-2 transition-colors disabled:opacity-50"
-                  >
-                    <ArrowRight className="w-5 h-5" />
-                  </motion.button>
+                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                            transition={{ duration: 0.2 }}
+                            className="absolute bottom-full mb-2 left-0 w-40 bg-white/90 backdrop-blur-md rounded-xl shadow-lg border border-blue-100/50 overflow-hidden"
+                          >
+                            <motion.button
+                              whileHover={{ backgroundColor: "rgba(59, 130, 246, 0.1)" }}
+                              onClick={() => {
+                                fileInputRef.current?.click();
+                                fileInputRef.current?.setAttribute("accept", "image/*");
+                              }}
+                              className="w-full px-4 py-3 text-left text-sm font-serif text-foreground flex items-center gap-3 transition-colors"
+                            >
+                              <ImageIcon className="w-4 h-4" />
+                              Image
+                            </motion.button>
+                            <motion.button
+                              whileHover={{ backgroundColor: "rgba(59, 130, 246, 0.1)" }}
+                              onClick={() => {
+                                fileInputRef.current?.click();
+                                fileInputRef.current?.setAttribute(
+                                  "accept",
+                                  ".pdf,.doc,.docx,.txt"
+                                );
+                              }}
+                              className="w-full px-4 py-3 text-left text-sm font-serif text-foreground flex items-center gap-3 transition-colors border-t border-blue-100/30"
+                            >
+                              <Paperclip className="w-4 h-4" />
+                              File
+                            </motion.button>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+
+                    {/* Hidden File Input */}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept="image/*,.pdf,.doc,.docx,.txt"
+                      onChange={handleFileSelect}
+                      className="hidden"
+                    />
+
+                    <input
+                      type="text"
+                      placeholder="Ask me anything..."
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                      onKeyPress={handleKeyPress}
+                      className="flex-1 bg-transparent text-foreground placeholder-muted-foreground focus:outline-none font-serif text-base"
+                      disabled={isLoading || isProcessingOCR}
+                    />
+                    {/* Mic Button */}
+                    <motion.button
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={handleMicClick}
+                      className={`relative w-10 h-10 ${
+                        isRecording ? "bg-red-500" : "bg-blue-500"
+                      } hover:bg-blue-600 text-white rounded-full p-2 transition-colors flex items-center justify-center`}
+                    >
+                      {isRecording ? (
+                        <div className="flex gap-1 items-center justify-center h-full">
+                          {visualizerBars.map((bar, i) => (
+                            <motion.div
+                              key={i}
+                              animate={{ height: `${Math.max(4, bar * 20)}px` }}
+                              transition={{ duration: 0.1 }}
+                              className="w-1 bg-white rounded-full"
+                              style={{ minHeight: "4px" }}
+                            />
+                          ))}
+                        </div>
+                      ) : (
+                        <Mic className="w-5 h-5" />
+                      )}
+                    </motion.button>
+                    <motion.button
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={handleSendMessage}
+                      disabled={isLoading || !message.trim() || isProcessingOCR}
+                      className="bg-blue-500 hover:bg-blue-600 text-white rounded-full p-2 transition-colors disabled:opacity-50"
+                    >
+                      <ArrowRight className="w-5 h-5" />
+                    </motion.button>
+                  </div>
                 </div>
-              </motion.div>
+              </div>
             </motion.div>
           ) : (
             // INITIAL VIEW
@@ -455,6 +856,52 @@ export default function Home() {
                   </h1>
                 </motion.div>
 
+                {/* Attached Files Preview */}
+                {attachedFiles.length > 0 && (
+                  <div className="flex flex-wrap gap-2 justify-center">
+                    {attachedFiles.map((file, index) => (
+                      <motion.div
+                        key={index}
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.8 }}
+                        className="relative group"
+                      >
+                        {file.type === "image" ? (
+                          <div className="relative">
+                            <img
+                              src={file.preview}
+                              alt="Preview"
+                              className="w-20 h-20 object-cover rounded-lg border-2 border-blue-100"
+                            />
+                            <button
+                              onClick={() => removeFile(index)}
+                              className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="relative">
+                            <div className="w-20 h-20 bg-white/80 rounded-lg border-2 border-blue-100 flex flex-col items-center justify-center p-2">
+                              <File className="w-6 h-6 text-blue-500" />
+                              <span className="text-xs text-foreground/70 mt-1 truncate w-full text-center">
+                                {file.file.name.slice(0, 8)}...
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => removeFile(index)}
+                              className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+
                 {/* Input Box */}
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
@@ -462,6 +909,67 @@ export default function Home() {
                   transition={{ duration: 0.5, delay: 0.2 }}
                   className="bg-white/80 backdrop-blur-md rounded-3xl shadow-2xl border border-blue-100/50 p-6 flex gap-3 items-center"
                 >
+                  {/* Attachment Button */}
+                  <div className="relative attach-menu-container">
+                    <motion.button
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => setAttachMenuOpen(!attachMenuOpen)}
+                      className="w-10 h-10 bg-gray-100 hover:bg-gray-200 text-foreground rounded-full p-2 transition-colors flex items-center justify-center"
+                    >
+                      <Plus className="w-5 h-5" />
+                    </motion.button>
+
+                    {/* Attachment Menu */}
+                    <AnimatePresence>
+                      {attachMenuOpen && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                          transition={{ duration: 0.2 }}
+                          className="absolute bottom-full mb-2 left-0 w-40 bg-white/90 backdrop-blur-md rounded-xl shadow-lg border border-blue-100/50 overflow-hidden"
+                        >
+                          <motion.button
+                            whileHover={{ backgroundColor: "rgba(59, 130, 246, 0.1)" }}
+                            onClick={() => {
+                              fileInputRef.current?.click();
+                              fileInputRef.current?.setAttribute("accept", "image/*");
+                            }}
+                            className="w-full px-4 py-3 text-left text-sm font-serif text-foreground flex items-center gap-3 transition-colors"
+                          >
+                            <ImageIcon className="w-4 h-4" />
+                            Image
+                          </motion.button>
+                          <motion.button
+                            whileHover={{ backgroundColor: "rgba(59, 130, 246, 0.1)" }}
+                            onClick={() => {
+                              fileInputRef.current?.click();
+                              fileInputRef.current?.setAttribute(
+                                "accept",
+                                ".pdf,.doc,.docx,.txt"
+                              );
+                            }}
+                            className="w-full px-4 py-3 text-left text-sm font-serif text-foreground flex items-center gap-3 transition-colors border-t border-blue-100/30"
+                          >
+                            <Paperclip className="w-4 h-4" />
+                            File
+                          </motion.button>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
+                  {/* Hidden File Input */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept="image/*,.pdf,.doc,.docx,.txt"
+                    onChange={handleFileSelect}
+                    className="hidden"
+                  />
+
                   <input
                     type="text"
                     placeholder="Ask me anything..."
@@ -470,7 +978,7 @@ export default function Home() {
                     onKeyPress={handleKeyPress}
                     className="flex-1 bg-transparent text-foreground placeholder-muted-foreground focus:outline-none font-serif text-base"
                     autoFocus
-                    disabled={isLoading}
+                    disabled={isLoading || isProcessingOCR}
                   />
                   {/* Mic Button */}
                   <motion.button
@@ -501,7 +1009,7 @@ export default function Home() {
                     whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.95 }}
                     onClick={handleSendMessage}
-                    disabled={isLoading || !message.trim()}
+                    disabled={isLoading || !message.trim() || isProcessingOCR}
                     className="bg-blue-500 hover:bg-blue-600 text-white rounded-full p-2 transition-colors disabled:opacity-50"
                   >
                     <ArrowRight className="w-5 h-5" />

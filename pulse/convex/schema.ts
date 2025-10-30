@@ -6,8 +6,12 @@ export default defineSchema({
     user: v.string(),
     role: v.union(v.literal("user"), v.literal("assistant")),
     text: v.string(),
+    chatId: v.optional(v.string()),
     createdAt: v.number(),
-  }).index("by_user", ["user"]),
+  })
+    .index("by_user", ["user"])
+    .index("by_chat", ["chatId"])
+    .index("by_user_and_chat", ["user", "chatId"]),
 
   appointments: defineTable({
     user: v.string(),
