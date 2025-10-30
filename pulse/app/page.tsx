@@ -1,4 +1,3 @@
-// Your new, fully-fixed app/page.tsx
 "use client";
 
 import type React from "react";
@@ -17,14 +16,11 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 
-// --- Logic Imports (with corrected relative paths) ---
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../convex/_generated/api";
 import { Doc } from "../convex/_generated/dataModel";
 import { useSpeechInput, speak } from "../utils/speech";
-// --- End Logic Imports ---
 
-// This interface is for the *typing indicator*
 interface TypingMessage {
   id: string;
   type: "ai";
@@ -32,7 +28,6 @@ interface TypingMessage {
   isTyping: boolean;
 }
 
-// This interface is from the v0 UI's (empty) sidebar
 interface ChatItem {
   id: number;
   title: string;
@@ -40,15 +35,14 @@ interface ChatItem {
 }
 
 export default function Home() {
-  // --- States from v0 UI (RESTORED) ---
+  // --- States ---
   const [message, setMessage] = useState("");
-  const [sidebarOpen, setSidebarOpen] = useState(false); // Set to false by default
-  const [messages, setMessages] = useState<TypingMessage[]>([]); // This is for local typing indicator, not Convex
-  const [isChatActive, setIsChatActive] = useState(false); // FIX: Set to false to show animation
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isChatActive, setIsChatActive] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // --- States for Mic Visualizer (RESTORED from v0) ---
+  // --- Mic Visualizer States ---
   const [isRecording, setIsRecording] = useState(false);
   const [visualizerBars, setVisualizerBars] = useState([0, 0, 0, 0]);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -56,20 +50,17 @@ export default function Home() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
 
-  // --- States from your old logic ---
+  // --- Message States ---
   const [isLoading, setIsLoading] = useState(false);
   const [userId] = useState("user-" + Math.random().toString(36).substr(2, 9));
-  const [typingIndicator, setTypingIndicator] = useState<TypingMessage | null>(
-    null
-  );
+  const [typingIndicator, setTypingIndicator] = useState<TypingMessage | null>(null);
 
   // --- Convex Hooks ---
   const convexMessages = useQuery(api.messages.list, { user: userId }) || [];
   const sendMessage = useMutation(api.messages.send);
 
   // --- Speech Hook ---
-  const { transcript, listening, toggleListening, resetTranscript } =
-    useSpeechInput();
+  const { transcript, listening, toggleListening, resetTranscript } = useSpeechInput();
 
   // --- Effects ---
   useEffect(() => {
@@ -82,7 +73,7 @@ export default function Home() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [convexMessages, typingIndicator]);
 
-  // --- Visualizer Logic (RESTORED from v0) ---
+  // --- Visualizer Logic ---
   const updateVisualizer = () => {
     if (!analyserRef.current) return;
 
@@ -105,12 +96,10 @@ export default function Home() {
     animationFrameRef.current = requestAnimationFrame(updateVisualizer);
   };
 
-  // --- Mic Click Handler (MERGED v0 Visualizer + your Speech-to-Text) ---
+  // --- Mic Click Handler ---
   const handleMicClick = async () => {
-    // This is from your hook
     toggleListening();
 
-    // This is from v0
     if (isRecording) {
       setIsRecording(false);
       if (mediaRecorderRef.current) {
@@ -126,7 +115,6 @@ export default function Home() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const audioContext = new (window.AudioContext ||
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (window as any).webkitAudioContext)();
       audioContextRef.current = audioContext;
       const analyser = audioContext.createAnalyser();
@@ -145,12 +133,11 @@ export default function Home() {
     }
   };
 
-  // --- Send Message Handler (FIXED) ---
+  // --- Send Message Handler ---
   const handleSendMessage = async () => {
     const messageText = message.trim();
     if (!messageText || isLoading) return;
 
-    // FIX: Activate chat on first message
     if (!isChatActive) {
       setIsChatActive(true);
     }
@@ -160,14 +147,12 @@ export default function Home() {
     setIsLoading(true);
 
     try {
-      // 1. Save user message
       await sendMessage({
         user: userId,
         role: "user",
         text: messageText,
       });
 
-      // 2. Show typing indicator
       setTypingIndicator({
         id: "typing-id",
         type: "ai",
@@ -176,7 +161,6 @@ export default function Home() {
       });
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
 
-      // 3. Call API
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -186,15 +170,11 @@ export default function Home() {
       if (!response.ok) throw new Error("API request failed");
       const { response: aiText } = await response.json();
 
-      // 4. Save AI response
       await sendMessage({
         user: userId,
         role: "assistant",
         text: aiText,
       });
-
-      // 5. FIX: REMOVED automatic `speak(aiText);`
-      // Speech is now handled by the user clicking the icon.
     } catch (error) {
       console.error("Error sending message:", error);
       await sendMessage({
@@ -215,22 +195,9 @@ export default function Home() {
     }
   };
 
-  // --- v0 Sidebar Logic (Empty for now) ---
-  const previousChats: ChatItem[] = [];
-  const groupChatsByTime = (chats: ChatItem[]) => {
-    // ... (grouping logic from v0)
-    return { today: [], yesterday: [], thisWeek: [], older: [] };
-  };
-  const formatTime = (date: Date) => {
-    // ... (time formatting logic from v0)
-    return "";
-  };
-  const groupedChats = groupChatsByTime(previousChats);
-  // --- End v0 Sidebar Logic ---
-
   return (
     <main className="relative min-h-screen overflow-hidden flex">
-      {/* Background (from v0) */}
+      {/* Background */}
       <div
         className="absolute inset-0 z-0"
         style={{
@@ -242,7 +209,7 @@ export default function Home() {
         <div className="absolute bottom-32 right-20 w-80 h-80 bg-blue-200 rounded-full blur-pulse-slow opacity-35" />
       </div>
 
-      {/* Sidebar (from v0) */}
+      {/* Sidebar */}
       <motion.div
         initial={{ width: 0 }}
         animate={{ width: sidebarOpen ? 256 : 0 }}
@@ -250,14 +217,15 @@ export default function Home() {
         className="relative z-20 bg-white/70 backdrop-blur-md border-r border-blue-100/50 flex flex-col overflow-hidden"
       >
         <div className="p-4 space-y-6 flex-1 overflow-y-auto">
-          <h2 className="text-sm font-serif font-light text-foreground tracking-wide">Previous Chats</h2>
-          {/* ... (v0 sidebar JSX, currently empty) ... */}
+          <h2 className="text-sm font-serif font-light text-foreground tracking-wide">
+            Previous Chats
+          </h2>
         </div>
       </motion.div>
 
-      {/* Main Content (from v0) */}
+      {/* Main Content */}
       <div className="relative z-10 flex-1 flex flex-col">
-        {/* Top Controls (from v0) */}
+        {/* Top Controls */}
         <div className="absolute top-6 left-6 z-30">
           <motion.button
             whileHover={{ scale: 1.05 }}
@@ -268,6 +236,7 @@ export default function Home() {
             {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </motion.button>
         </div>
+
         <div className="absolute top-6 right-6 z-30">
           <motion.button
             whileHover={{ scale: 1.05 }}
@@ -313,10 +282,10 @@ export default function Home() {
           </AnimatePresence>
         </div>
 
-        {/* This is the restored v0 animation logic */}
+        {/* Main Views */}
         <AnimatePresence mode="wait">
           {isChatActive ? (
-            // --- CHAT VIEW ---
+            // CHAT VIEW
             <motion.div
               key="chat-view"
               initial={{ opacity: 0 }}
@@ -327,7 +296,7 @@ export default function Home() {
             >
               <div className="flex-1 overflow-y-auto px-6 py-24 flex justify-center">
                 <div className="w-full max-w-2xl space-y-4">
-                  {/* --- Convex Messages --- */}
+                  {/* Messages */}
                   {convexMessages.map((msg: Doc<"messages">) => (
                     <motion.div
                       key={msg._id}
@@ -338,7 +307,7 @@ export default function Home() {
                         msg.role === "user" ? "justify-end" : "justify-start"
                       }`}
                     >
-                      {/* "Read Aloud" button for AI */}
+                      {/* Read Aloud Button */}
                       {msg.role === "assistant" && (
                         <motion.button
                           onClick={() => speak(msg.text)}
@@ -350,21 +319,17 @@ export default function Home() {
                         </motion.button>
                       )}
 
-                      {/* --- THE FIX IS HERE --- */}
+                      {/* Message Bubble - FIXED */}
                       <motion.div
                         whileHover={{ scale: 1.02 }}
                         className={`max-w-xs px-4 py-3 rounded-2xl font-serif text-sm ${
                           msg.role === "user"
                             ? "bg-blue-500 text-white rounded-br-none"
                             : "bg-white/80 backdrop-blur-md text-foreground border border-blue-100/50 rounded-bl-none"
-                        } prose prose-sm prose-p:my-0`} // <-- 1. Classes moved here
+                        } prose prose-sm prose-p:my-0`}
                       >
-                        <ReactMarkdown> {/* <-- 2. className removed */}
-                          {msg.text}
-                        </ReactMarkdown>
+                        <ReactMarkdown>{msg.text}</ReactMarkdown>
                       </motion.div>
-                      {/* --- END OF FIX --- */}
-
                     </motion.div>
                   ))}
 
@@ -385,7 +350,7 @@ export default function Home() {
                               duration: 0.6,
                               repeat: Number.POSITIVE_INFINITY,
                             }}
-                            className="typing-dot w-2 h-2 bg-foreground rounded-full"
+                            className="w-2 h-2 bg-foreground rounded-full"
                           />
                           <motion.span
                             animate={{ y: [0, -4, 0] }}
@@ -394,7 +359,7 @@ export default function Home() {
                               repeat: Number.POSITIVE_INFINITY,
                               delay: 0.1,
                             }}
-                            className="typing-dot w-2 h-2 bg-foreground rounded-full"
+                            className="w-2 h-2 bg-foreground rounded-full"
                           />
                           <motion.span
                             animate={{ y: [0, -4, 0] }}
@@ -403,7 +368,7 @@ export default function Home() {
                               repeat: Number.POSITIVE_INFINITY,
                               delay: 0.2,
                             }}
-                            className="typing-dot w-2 h-2 bg-foreground rounded-full"
+                            className="w-2 h-2 bg-foreground rounded-full"
                           />
                         </div>
                       </motion.div>
@@ -431,7 +396,7 @@ export default function Home() {
                     autoFocus
                     disabled={isLoading}
                   />
-                  {/* Mic Button with Visualizer */}
+                  {/* Mic Button */}
                   <motion.button
                     whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.95 }}
@@ -469,7 +434,7 @@ export default function Home() {
               </motion.div>
             </motion.div>
           ) : (
-            // --- INITIAL "PULSE" VIEW (RESTORED from v0) ---
+            // INITIAL VIEW
             <motion.div
               key="initial-view"
               initial={{ opacity: 0 }}
@@ -485,10 +450,12 @@ export default function Home() {
                   transition={{ duration: 0.5, delay: 0.1 }}
                   className="text-center"
                 >
-                  <h1 className="text-6xl font-serif font-light text-foreground tracking-wide">Pulse</h1>
+                  <h1 className="text-6xl font-serif font-light text-foreground tracking-wide">
+                    Pulse
+                  </h1>
                 </motion.div>
 
-                {/* Input Box (Initial View) */}
+                {/* Input Box */}
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -505,7 +472,7 @@ export default function Home() {
                     autoFocus
                     disabled={isLoading}
                   />
-                  {/* Mic Button with Visualizer (Initial View) */}
+                  {/* Mic Button */}
                   <motion.button
                     whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.95 }}
@@ -539,7 +506,7 @@ export default function Home() {
                   >
                     <ArrowRight className="w-5 h-5" />
                   </motion.button>
-                </div>
+                </motion.div>
               </div>
             </motion.div>
           )}
